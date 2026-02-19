@@ -6,15 +6,15 @@
 |---|---|---|
 | Fase 0 | ✅ | Setup de cuentas, proyecto y spreadsheet |
 | Fase 1 | ✅ | Webhook recibe mensajes de WhatsApp |
-| Fase 2 | 🔄 | LLM Provider con tool calling (refactoring) |
-| Fase 3 | 🔄 | Sheets Service — extensión con delete y search |
-| Fase 4 | ⬜ | Agent Core (memory, tools, reasoning loop) |
-| Fase 5 | ⬜ | Limpieza: eliminar arquitectura vieja |
+| Fase 2 | ✅ | LLM Provider con tool calling |
+| Fase 3 | ✅ | Sheets Service — extensión con delete y search |
+| Fase 4 | ✅ | Agent Core (memory, tools, reasoning loop) |
+| Fase 5 | ✅ | Limpieza: eliminar arquitectura vieja |
 | Fase 6 | ⬜ | Tests del agente |
 | Fase 7 | ⬜ | Deploy en producción con HTTPS |
 | Fase 8 | ⬜ | Refinamiento y UX |
 
-> ✅ Completado · 🔄 Refactoring de código existente · ⬜ Pendiente
+> ✅ Completado · ⬜ Pendiente
 
 ---
 
@@ -52,7 +52,7 @@ Implementado. `GET /webhook` y `POST /webhook` funcionan.
 
 ---
 
-## Fase 2: LLM Provider — Tool Calling 🔄
+## Fase 2: LLM Provider — Tool Calling ✅
 
 **Objetivo**: Extender `llm_provider.py` para que soporte el protocolo de tool calling nativo de cada proveedor.
 
@@ -119,7 +119,7 @@ El `llm_provider.py` actual expone solo `complete(system_prompt, user_message) -
 
 ---
 
-## Fase 3: Google Sheets Service — Extensión 🔄
+## Fase 3: Google Sheets Service — Extensión ✅
 
 **Objetivo**: Agregar los dos métodos que necesita el Tool Registry pero no existen aún.
 
@@ -145,7 +145,7 @@ El `llm_provider.py` actual expone solo `complete(system_prompt, user_message) -
 
 ---
 
-## Fase 4: Agent Core ⬜
+## Fase 4: Agent Core ✅
 
 **Objetivo**: Construir el núcleo del agente: memoria de conversación, registro de herramientas y el reasoning loop.
 
@@ -253,7 +253,7 @@ El `llm_provider.py` actual expone solo `complete(system_prompt, user_message) -
 
 ---
 
-## Fase 5: Limpieza — Eliminar Arquitectura Vieja ⬜
+## Fase 5: Limpieza — Eliminar Arquitectura Vieja ✅
 
 **Objetivo**: Eliminar los archivos de la arquitectura anterior que quedaron obsoletos.
 
