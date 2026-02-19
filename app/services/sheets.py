@@ -77,8 +77,11 @@ class SheetsService:
         logger.info("Usuario nuevo registrado: %s", phone)
         return True
 
-    def append_expense(self, phone: str, expense: ParsedExpense) -> bool:
-        """Agrega un gasto a la hoja del usuario."""
+    def append_expense(self, phone: str, expense: ParsedExpense) -> int:
+        """
+        Agrega un gasto a la hoja del usuario.
+        Retorna el índice de fila del gasto nuevo (1-based), o 0 si hubo un error.
+        """
         try:
             ws = self._get_or_create_user_sheet(phone)
             now = datetime.now()
@@ -92,12 +95,84 @@ class SheetsService:
                 expense.calculation or "",
                 expense.raw_message,
             ]
+            # Contar filas actuales para saber el índice de la nueva
+            current_rows = ws.get_all_values()
+            row_index = len(current_rows) + 1
             ws.append_row(row, value_input_option="USER_ENTERED")
-            logger.info("Gasto registrado para %s: %s %s", phone, expense.amount, expense.currency)
-            return True
+            logger.info(
+                "Gasto registrado para %s: %s %s (fila %d)",
+                phone, expense.amount, expense.currency, row_index,
+            )
+            return row_index
         except Exception as e:
             logger.error("Error guardando gasto para %s: %s", phone, e)
+            return 0
+
+    def delete_expense(self, phone: str, row_index: int) -> bool:
+        """
+        Elimina una fila de gasto por índice (1-based).
+        Retorna True si tuvo éxito, False si hubo un error.
+        """
+        try:
+            ws = self._get_or_create_user_sheet(phone)
+            ws.delete_rows(row_index)
+            logger.info("Gasto eliminado para %s en fila %d", phone, row_index)
+            return True
+        except Exception as e:
+            logger.error("Error eliminando gasto para %s: %s", phone, e)
             return False
+
+    def search_expenses(
+        self,
+        phone: str,
+        query: "str | None" = None,
+        date_from: "str | None" = None,
+        date_to: "str | None" = None,
+    ) -> list[dict]:
+        """
+        Busca gastos filtrando por texto en descripción y/o rango de fechas.
+
+        - query: texto a buscar en la columna Descripción (case-insensitive).
+        - date_from / date_to: límites en formato YYYY-MM-DD (inclusivos).
+        - Retorna lista de dicts con row_index incluido para facilitar delete_expense.
+        """
+        try:
+            ws = self.spreadsheet.worksheet(self._get_user_sheet_name(phone))
+            all_rows = ws.get_all_values()
+        except gspread.WorksheetNotFound:
+            return []
+
+        data_rows = all_rows[1:]  # omitir fila de headers (fila 1)
+        result = []
+
+        for i, row in enumerate(data_rows):
+            row_index = i + 2  # +1 de 0-based→1-based, +1 por la fila de headers
+            try:
+                fecha = row[0] if len(row) > 0 else ""
+                descripcion = row[4].lower() if len(row) > 4 else ""
+
+                if query and query.lower() not in descripcion:
+                    continue
+                if date_from and fecha < date_from:
+                    continue
+                if date_to and fecha > date_to:
+                    continue
+
+                result.append(
+                    {
+                        "row_index": row_index,
+                        "fecha": row[0] if len(row) > 0 else "",
+                        "hora": row[1] if len(row) > 1 else "",
+                        "monto": float(row[2]) if len(row) > 2 and row[2] else 0.0,
+                        "moneda": row[3] if len(row) > 3 else "",
+                        "descripcion": row[4] if len(row) > 4 else "",
+                        "categoria": row[5] if len(row) > 5 else "",
+                    }
+                )
+            except (ValueError, IndexError):
+                continue
+
+        return result
 
     def get_monthly_total(self, phone: str, month: int, year: int) -> float:
         """Obtiene el total de gastos del mes (solo moneda default)."""
