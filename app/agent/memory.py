@@ -12,10 +12,12 @@ class ConversationMemory:
     """
     Almacenamiento en memoria del historial de conversación por usuario.
     Cada entrada expira después de `ttl_minutes` de inactividad.
+    También indexa mensajes enviados por wamid para soportar el reply nativo de WhatsApp.
     """
 
     def __init__(self, ttl_minutes: int = 60) -> None:
         self._store: dict[str, tuple[list[Message], datetime]] = {}
+        self._wamid_index: dict[str, dict[str, str]] = {}  # phone → {wamid: texto}
         self._ttl = timedelta(minutes=ttl_minutes)
 
     def get(self, phone: str) -> list[Message]:
@@ -39,4 +41,18 @@ class ConversationMemory:
     def clear(self, phone: str) -> None:
         """Borra el historial manualmente (ej: usuario pide 'nueva conversación')."""
         self._store.pop(phone, None)
+        self._wamid_index.pop(phone, None)
         logger.debug("Historial de %s borrado manualmente", phone)
+
+    def store_wamid(self, phone: str, wamid: str, text: str) -> None:
+        """Guarda el texto de un mensaje enviado, indexado por su wamid."""
+        if phone not in self._wamid_index:
+            self._wamid_index[phone] = {}
+        self._wamid_index[phone][wamid] = text
+
+    def get_by_wamid(self, phone: str, wamid: str) -> str | None:
+        """
+        Retorna el texto de un mensaje previamente enviado dado su wamid.
+        Retorna None si el ID no está en el índice (mensaje antiguo o fuera de sesión).
+        """
+        return self._wamid_index.get(phone, {}).get(wamid)

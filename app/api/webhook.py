@@ -56,6 +56,12 @@ async def receive_message(request: Request):
             return {"status": "ok"}
 
         text = message["text"]["body"]
+
+        # Detectar si el usuario respondió a un mensaje específico (reply nativo de WhatsApp)
+        replied_to_id: str | None = message.get("context", {}).get("id")
+        if replied_to_id:
+            logger.info("Reply detectado de %s → wamid referenciado: %s", phone, replied_to_id)
+
     except (KeyError, IndexError) as e:
         logger.warning("Payload inválido: %s", e)
         return {"status": "ok"}
@@ -71,9 +77,12 @@ async def receive_message(request: Request):
     try:
         from app.services import whatsapp
 
-        reply = await _agent.process(phone, text)
+        reply = await _agent.process(phone, text, replied_to_id=replied_to_id)
         if reply:
-            await whatsapp.send_text(phone, reply)
+            wamid = await whatsapp.send_text(phone, reply)
+            # Indexar el mensaje enviado para que futuros replies puedan referenciarlo
+            if wamid:
+                _agent.memory.store_wamid(phone, wamid, reply)
     except Exception as e:
         logger.error("Error procesando mensaje de %s: %s", phone, e, exc_info=True)
 
