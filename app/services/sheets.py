@@ -22,6 +22,8 @@ EXPENSE_HEADERS = [
     "Categoría",
     "Cálculo",
     "Mensaje Original",
+    "Monto Original",
+    "Moneda Original",
 ]
 
 USERS_HEADERS = ["Teléfono", "Nombre", "Moneda Default", "Fecha Registro"]
@@ -94,6 +96,8 @@ class SheetsService:
                 expense.category,
                 expense.calculation or "",
                 expense.raw_message,
+                expense.original_amount or "",
+                expense.original_currency or "",
             ]
             # Contar filas actuales para saber el índice de la nueva
             current_rows = ws.get_all_values()

@@ -13,3 +13,5 @@ class ParsedExpense:
     raw_message: str
     calculation: Optional[str] = None
     source: str = "llm"  # "llm" o "regex"
+    original_amount: Optional[float] = None  # Monto antes de conversión
+    original_currency: Optional[str] = None  # Moneda original si fue convertida
