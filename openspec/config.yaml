@@ -1,0 +1,59 @@
+# Spec-Driven Development (SDD) Configuration
+# Project: finance_org_wpp
+# Generated: 2026-02-25
+
+project:
+  name: finance_org_wpp
+  description: "WhatsApp expense bot with FastAPI, LLM integration, and Google Sheets storage"
+  version: "1.0.0"
+
+tech_stack:
+  language: Python
+  primary_framework: FastAPI
+  version: "3.11+"
+  key_dependencies:
+    - "fastapi (API framework)"
+    - "uvicorn (ASGI server)"
+    - "pytest + pytest-asyncio (testing)"
+    - "google-auth + gspread (Google Sheets)"
+    - "openrouter (LLM provider)"
+    - "python-dotenv (config)"
+  integrations:
+    - "Meta WhatsApp Cloud API (webhook)"
+    - "Google Sheets API"
+    - "LLM APIs (Gemini, DeepSeek via OpenRouter)"
+
+conventions:
+  versioning: "Git-based (no semver tags yet)"
+  commit_style: "feat/fix/chore: descriptive message (Spanish/English mixed)"
+  testing_framework: "pytest + pytest-asyncio"
+  test_location: "tests/"
+  async_support: "yes (FastAPI + httpx)"
+
+artifact_store:
+  mode: engram
+  backend: "Engram (persistent memory)"
+  location: "~/.engram (not in project directory)"
+  benefit: "Specs/design/tasks stored persistently, no cluttering of project repo"
+
+sdd_workflow:
+  - "1. /sdd:new <change-name>  → creates proposal"
+  - "2. /sdd:continue           → specs"
+  - "3. /sdd:continue           → design"
+  - "4. /sdd:continue           → tasks"
+  - "5. /sdd:apply              → implement + test"
+  - "6. /sdd:verify             → validate"
+  - "7. /sdd:archive            → finalize"
+
+important_notes:
+  - ".env and credentials/ are .gitignored"
+  - "FastAPI app uses async/await"
+  - "External dependencies: WhatsApp token, Google Sheets, LLM API keys required"
+  - "Project mixes Spanish docs and English code comments"
+  - "Webhook must be publicly accessible"
+
+next_steps:
+  - "Start a change: /sdd:new <descriptive-name>"
+  - "Fast-forward: /sdd:ff <change-name>"
+  - "All specs stored in Engram (~/.engram)"
+  - "View artifacts: engram search <topic>"
