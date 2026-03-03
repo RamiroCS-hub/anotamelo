@@ -7,7 +7,8 @@ from typing import Callable, Literal
 @dataclass
 class Message:
     role: Literal["system", "user", "assistant", "tool"]
-    content: "str | list"  # str para texto; list[ToolCall] para tool calls; str para tool results
+    content: "str | None" = None  # str para texto u outputs de tool
+    tool_calls: "list[ToolCall] | None" = None # Lista de tool calls que hace el asistente
     tool_call_id: "str | None" = None  # Para tool results (OpenAI/DeepSeek)
     tool_name: "str | None" = None     # Para tool results (Gemini necesita el nombre)
 

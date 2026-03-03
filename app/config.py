@@ -31,6 +31,15 @@ class Settings:
     )
     LLM_TIMEOUT_SECONDS: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "5"))
 
+    # Transcription
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    TRANSCRIPTION_MODEL: str = os.getenv("TRANSCRIPTION_MODEL", "whisper-large-v3-turbo")
+
+    # Database
+    DATABASE_URL: str = os.getenv(
+        "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5433/finance_bot"
+    )
+
     # App
     DEFAULT_CURRENCY: str = os.getenv("DEFAULT_CURRENCY", "ARS")
     ALLOWED_PHONE_NUMBERS: List[str] = [

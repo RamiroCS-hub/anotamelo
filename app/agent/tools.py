@@ -82,7 +82,7 @@ class ToolRegistry:
     # Implementaciones de herramientas
     # ------------------------------------------------------------------
 
-    def _register_expense(
+    async def _register_expense(
         self,
         amount: float,
         description: str,
@@ -92,6 +92,10 @@ class ToolRegistry:
         original_currency: str | None = None,
     ) -> dict:
         from app.config import settings
+        from app.db.database import async_session_maker
+        from app.services.goals import update_goal_progress
+        from app.db.models import User
+        from sqlalchemy import select
 
         expense = ParsedExpense(
             amount=float(amount),
@@ -104,16 +108,33 @@ class ToolRegistry:
             original_currency=original_currency,
         )
         row_index = self.sheets.append_expense(self.phone, expense)
-        if row_index:
-            return {
-                "success": True,
-                "row_index": row_index,
-                "amount": expense.amount,
-                "description": expense.description,
-                "category": expense.category,
-                "currency": expense.currency,
-            }
-        return {"success": False, "error": "No se pudo guardar el gasto en Google Sheets"}
+        if not row_index:
+            return {"success": False, "error": "No se pudo guardar el gasto en Google Sheets"}
+
+        result = {
+            "success": True,
+            "row_index": row_index,
+            "amount": expense.amount,
+            "description": expense.description,
+            "category": expense.category,
+            "currency": expense.currency,
+        }
+
+        try:
+            async with async_session_maker() as session:
+                user_query = select(User).where(User.whatsapp_number == self.phone)
+                user_res = await session.execute(user_query)
+                user = user_res.scalar_one_or_none()
+                
+                if user:
+                    goal_update = await update_goal_progress(session, user_id=user.id, group_id=None, amount=expense.amount)
+                    if goal_update:
+                        result["goal_status"] = goal_update["status"]
+                        result["goal_message"] = goal_update["message"]
+        except Exception as e:
+            logger.error("Error actualizando meta para %s: %s", self.phone, e)
+
+        return result
 
     def _get_monthly_summary(
         self,
@@ -242,6 +263,61 @@ class ToolRegistry:
             return {"success": True, "pic_url": pic_url, "wamid": wamid}
         return {"success": False, "error": "No se pudo enviar la foto por WhatsApp"}
 
+    async def _get_user_groups_info(self) -> dict:
+        from app.db.database import async_session_maker
+        from app.db.models import User, Group, GroupMember, Goal
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        try:
+            async with async_session_maker() as session:
+                query = select(User).where(User.whatsapp_number == self.phone).options(
+                    selectinload(User.group_memberships).selectinload(GroupMember.group)
+                )
+                result = await session.execute(query)
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    return {"success": False, "error": "Usuario no encontrado"}
+
+                groups_info = []
+                for membership in user.group_memberships:
+                    group = membership.group
+                    goal_query = select(Goal).where(Goal.group_id == group.id, Goal.status == "active")
+                    goal_res = await session.execute(goal_query)
+                    goals = goal_res.scalars().all()
+                    
+                    groups_info.append({
+                        "name": group.name,
+                        "whatsapp_group_id": group.whatsapp_group_id,
+                        "active_goals": [
+                            {"target_amount": g.target_amount, "current_amount": g.current_amount}
+                            for g in goals
+                        ]
+                    })
+                return {"success": True, "groups": groups_info}
+        except Exception as e:
+            logger.error("Error en _get_user_groups_info: %s", e)
+            return {"success": False, "error": str(e)}
+
+    async def _save_personality(self, prompt: str) -> dict:
+        from app.db.database import async_session_maker
+        from app.services.personality import save_custom_prompt
+
+        try:
+            async with async_session_maker() as session:
+                # La herramienta siempre asume que es para el usuario actual.
+                # Para grupos, necesitaríamos que el Agente sepa si está en contexto de grupo o de usuario.
+                # Por ahora, guardamos el prompt para el usuario.
+                await save_custom_prompt(session, self.phone, prompt, is_group=False)
+                return {
+                    "success": True, 
+                    "message": "Personalidad guardada exitosamente en la base de datos."
+                }
+        except Exception as e:
+            logger.error("Error guardando personalidad para %s: %s", self.phone, e)
+            return {"success": False, "error": str(e)}
+
     # ------------------------------------------------------------------
     # Definiciones (nombre, descripción, JSON Schema)
     # ------------------------------------------------------------------
@@ -252,7 +328,9 @@ class ToolRegistry:
                 name="register_expense",
                 description=(
                     "Registra un gasto del usuario en Google Sheets. "
-                    "Llamar siempre que el usuario mencione un monto y una descripción."
+                    "Llamar siempre que el usuario mencione un monto y una descripción. "
+                    "Si el resultado contiene 'goal_status' = 'completed', se ha alcanzado la meta de ahorro "
+                    "y debes felicitar al usuario e incluir el 'goal_message' en tu respuesta final."
                 ),
                 parameters={
                     "type": "object",
@@ -459,5 +537,35 @@ class ToolRegistry:
                 ),
                 parameters={"type": "object", "properties": {}},
                 fn=self._send_cat_pic,
+            ),
+            ToolDefinition(
+                name="get_user_groups_info",
+                description=(
+                    "Consulta en la base de datos a qué grupos de WhatsApp pertenece el usuario "
+                    "y devuelve la información de esos grupos junto con sus metas activas y el progreso de las mismas. "
+                    "Usar cuando el usuario pregunta por 'mis grupos', 'estado de mis grupos', 'metas de mis grupos', "
+                    "o cómo va el ahorro en los grupos en los que participa."
+                ),
+                parameters={"type": "object", "properties": {}},
+                fn=self._get_user_groups_info,
+            ),
+            ToolDefinition(
+                name="save_personality",
+                description=(
+                    "Guarda una nueva personalidad o reglas de comportamiento para el asistente en la base de datos. "
+                    "Usar cuando el usuario pide explícitamente que actúes diferente, cambies tu tono, o te da "
+                    "instrucciones persistentes sobre cómo querés que le respondas de ahora en adelante."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "Las nuevas instrucciones de comportamiento o personalidad a guardar.",
+                        },
+                    },
+                    "required": ["prompt"],
+                },
+                fn=self._save_personality,
             ),
         ]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 
 from app.agent.memory import ConversationMemory
@@ -9,6 +10,8 @@ from app.agent.tools import ToolRegistry
 from app.models.agent import Message
 from app.services.llm_provider import LLMProvider
 from app.services.sheets import SheetsService
+from app.db.database import async_session_maker
+from app.services.personality import get_custom_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +55,15 @@ del mes actual, o el mes actual si ya pasó el día 15. No necesitás llamar con
   3. Informá al usuario ambos valores (original y convertido)
 
 FORMATO:
-- Respondé siempre en español, de forma concisa y amigable.
-- Usá formato WhatsApp: *negrita* para totales y montos importantes.
+- Respondé siempre en español, de forma ULTRA CONCISA (máximo 2-3 líneas por respuesta).
+- Usá formato WhatsApp exclusivo: UN SOLO asterisco para *negrita* y UN subguión para _cursiva_.
+- PROHIBIDO usar Markdown clásico como "**" (doble asterisco) o "#" (títulos). Si necesitás un título, usá mayúsculas.
 - En resúmenes usá emojis por categoría: 🍔 Comida, 🚗 Transporte, 💊 Salud,\
  🛒 Supermercado, 🎮 Entretenimiento, 👕 Ropa, 📚 Educación, 🏠 Hogar, 📦 Otros.
+- Evitá explicaciones largas. Confirmá la acción en una sola frase. Ejemplos:
+  · "✅ Registré $850 en uber (Transporte)"
+  · "Total febrero: *$45.300*"
+  · "🍔 Comida *$12k* • 🚗 Transporte *$8k*"
 """
 
 
@@ -108,9 +116,19 @@ class AgentLoop:
                     "Reply con wamid %s no encontrado en memoria para %s", replied_to_id, phone
                 )
 
+        # Obtener personalidad
+        custom_prompt = None
+        try:
+            async with async_session_maker() as session:
+                custom_prompt = await get_custom_prompt(session, phone, is_group=False)
+        except Exception as e:
+            logger.error("Error al obtener personalidad: %s", e)
+
         messages = self.memory.get(phone) + [Message(role="user", content=user_text)]
         tools = ToolRegistry(self.sheets, phone)
         system_prompt = self._build_system_prompt()
+        if custom_prompt:
+            system_prompt = f"{custom_prompt}\n\n{system_prompt}"
 
         for iteration in range(self.max_iterations):
             logger.debug("Iteración %d del agente para %s", iteration + 1, phone)
@@ -120,16 +138,58 @@ class AgentLoop:
             )
 
             if response.finish_reason == "stop":
-                messages.append(Message(role="assistant", content=response.content))
+                content = response.content or ""
+                # Remover tags <think> y su contenido generados por modelos razonadores.
+                # Reemplazar con espacio para evitar que texto antes/después se pegue
+                content = re.sub(r'<think>.*?</think>', ' ', content, flags=re.DOTALL | re.IGNORECASE)
+                # A veces el modelo sólo pone <think> de apertura sin cierre al final del stream
+                content = re.sub(r'<think>.*$', '', content, flags=re.DOTALL | re.IGNORECASE)
+                # Limpiar espacios múltiples y líneas vacías consecutivas
+                content = re.sub(r'\s+', ' ', content)
+                content = content.strip()
+
+                # Adaptar Markdown a formato WhatsApp en caso de que el modelo decida ignorar el prompt
+                content = content.replace("**", "*")  # WhatsApp usa un solo asterisco
+                content = re.sub(r'^#+\s*', '', content, flags=re.MULTILINE)  # WhatsApp no soporta encabezados #
+                
+                messages.append(Message(role="assistant", content=content))
                 self.memory.append(phone, messages)
-                return response.content or ""
+                return content
 
             # finish_reason == "tool_use": ejecutar herramientas y continuar
-            messages.append(Message(role="assistant", content=response.tool_calls))
+            # El modelo puede devolver texto (ej. <think> tags) junto con la llamada a la herramienta
+            intermediate_content = response.content or ""
+            if intermediate_content:
+                intermediate_content = re.sub(r'<think>.*?</think>', ' ', intermediate_content, flags=re.DOTALL | re.IGNORECASE)
+                intermediate_content = re.sub(r'<think>.*$', '', intermediate_content, flags=re.DOTALL | re.IGNORECASE)
+                intermediate_content = re.sub(r'\s+', ' ', intermediate_content)
+                intermediate_content = intermediate_content.strip()
+                
+                if intermediate_content:
+                    intermediate_content = intermediate_content.replace("**", "*")
+                    intermediate_content = re.sub(r'^#+\s*', '', intermediate_content, flags=re.MULTILINE)
+
+            # Agregar el mensaje del asistente (que puede contener tool_calls y content opcional) al historial
+            # Asegurar que el type_hint es correcto, el content debe preservar los tool calls
+            messages.append(
+                Message(
+                    role="assistant",
+                    content=intermediate_content if intermediate_content else None,
+                    tool_calls=response.tool_calls,
+                )
+            )
+            
+            # Si el modelo razonó en voz alta y quedó algo de texto para el usuario, 
+            # podemos enviarlo parcialmetne, o simplemente no guardarlo en memory como texto
+            # Para WhatsApp, no enviaremos texto parcial de tool_use para no confundir,
+            # ya que el usuario recibe la respuesta final en "stop". Así evitamos dobles mensajes.
 
             for tool_call in (response.tool_calls or []):
                 try:
+                    import inspect
                     result = tools.run(tool_call.name, **tool_call.arguments)
+                    if inspect.iscoroutine(result):
+                        result = await result  # type: ignore
                 except Exception as e:
                     logger.error("Error en herramienta '%s': %s", tool_call.name, e)
                     result = {"error": str(e)}

@@ -213,7 +213,7 @@ class DeepSeekProvider:
                 self.base_url,
                 headers=headers,
                 json=payload,
-                timeout=30.0,
+                timeout=90.0,
             )
             response.raise_for_status()
             data = response.json()
@@ -246,7 +246,7 @@ class DeepSeekProvider:
                 self.base_url,
                 headers=headers,
                 json=payload,
-                timeout=30.0,
+                timeout=90.0,
             )
             response.raise_for_status()
             data = response.json()
@@ -256,15 +256,35 @@ class DeepSeekProvider:
         finish_reason = choice.get("finish_reason", "stop")
 
         if finish_reason == "tool_calls" or message.get("tool_calls"):
+            import ast
+
+            def _parse_args(raw: str) -> dict:
+                """Parsea los argumentos del tool call. Soporta JSON válido y dicts de Python (comillas simples)."""
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError:
+                    try:
+                        result = ast.literal_eval(raw)
+                        if isinstance(result, dict):
+                            return result
+                    except Exception:
+                        pass
+                    logger.warning("No se pudo parsear los argumentos del tool call: %s", raw)
+                    return {}
+
             tool_calls = [
                 ToolCall(
                     id=tc["id"],
                     name=tc["function"]["name"],
-                    arguments=json.loads(tc["function"]["arguments"]),
+                    arguments=_parse_args(tc["function"]["arguments"]),
                 )
                 for tc in (message.get("tool_calls") or [])
             ]
-            return ChatResponse(content=None, tool_calls=tool_calls, finish_reason="tool_use")
+            return ChatResponse(
+                content=message.get("content"),
+                tool_calls=tool_calls,
+                finish_reason="tool_use"
+            )
 
         return ChatResponse(
             content=message.get("content"),
@@ -293,7 +313,7 @@ class DeepSeekProvider:
             if msg.role == "user":
                 result.append({"role": "user", "content": msg.content})
             elif msg.role == "assistant":
-                if isinstance(msg.content, list):
+                if msg.tool_calls:
                     tool_calls_data = [
                         {
                             "id": tc.id,
@@ -303,10 +323,10 @@ class DeepSeekProvider:
                                 "arguments": json.dumps(tc.arguments),
                             },
                         }
-                        for tc in msg.content
+                        for tc in msg.tool_calls
                     ]
                     result.append(
-                        {"role": "assistant", "content": None, "tool_calls": tool_calls_data}
+                        {"role": "assistant", "content": msg.content, "tool_calls": tool_calls_data}
                     )
                 else:
                     result.append({"role": "assistant", "content": msg.content})

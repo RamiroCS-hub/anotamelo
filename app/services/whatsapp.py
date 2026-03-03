@@ -88,3 +88,41 @@ def send_image_sync(phone_number: str, image_url: str) -> str | None:
     except Exception as e:
         logger.error("Error enviando imagen a %s: %s", phone_number, e)
         return None
+
+async def download_media(media_id: str) -> bytes | None:
+    """
+    Descarga el contenido binario de un media_id desde WhatsApp.
+    Son 2 pasos:
+      1) GET a Graph API para obtener la URL real de descarga
+      2) GET a la URL de descarga para obtener los bytes
+    """
+    url = f"{GRAPH_API_URL}/{media_id}"
+    headers = {
+        "Authorization": f"Bearer {settings.WHATSAPP_TOKEN}"
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            # Step 1: Get media URL
+            response = await client.get(url, headers=headers, timeout=10.0)
+            response.raise_for_status()
+            media_info = response.json()
+            media_url = media_info.get("url")
+
+            if not media_url:
+                logger.error("No se pudo obtener la URL de descarga para el media_id %s", media_id)
+                return None
+
+            # Step 2: Download media bytes using the URL
+            # We still need the Bearer token for downloading
+            download_response = await client.get(media_url, headers=headers, timeout=20.0)
+            download_response.raise_for_status()
+            
+            return download_response.content
+    except httpx.HTTPError as e:
+        logger.error("Error HTTP descargando media %s: %s", media_id, e)
+        return None
+    except Exception as e:
+        logger.error("Error inesperado descargando media %s: %s", media_id, e)
+        return None
+
