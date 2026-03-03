@@ -4,3 +4,7 @@ __pycache__/
 .env
 credentials/*.json
 .DS_Store
+*.log
+result.json
+test_config.py
+test_match.py
