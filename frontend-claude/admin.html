@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — Waitlist Tesorero</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green: #25D366;
+      --green-dark: #128C7E;
+      --green-darker: #075E54;
+      --bg: #f9fafb;
+      --white: #ffffff;
+      --text: #1a1a2e;
+      --text-muted: #6b7280;
+      --border: #e5e7eb;
+      --radius: 12px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 40px 24px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 32px;
+    }
+
+    .header h1 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .back-link {
+      font-size: 0.85rem;
+      color: var(--green-dark);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .back-link:hover { text-decoration: underline; }
+
+    .stats {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      flex: 1;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      text-align: center;
+    }
+
+    .stat-number {
+      font-size: 2rem;
+      font-weight: 800;
+      color: var(--green-dark);
+    }
+
+    .stat-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .auth-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .auth-card p {
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+
+    .auth-form {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .auth-input {
+      flex: 1;
+      min-width: 220px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font: inherit;
+    }
+
+    .auth-error {
+      margin-top: 12px;
+      color: #dc2626;
+      font-size: 0.9rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 20px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-export {
+      background: var(--green);
+      color: white;
+    }
+    .btn-export:hover { background: var(--green-dark); }
+
+    .btn-clear {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+    .btn-clear:hover { background: #fecaca; }
+
+    .btn-refresh {
+      background: #e0f2fe;
+      color: #0284c7;
+    }
+    .btn-refresh:hover { background: #bae6fd; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--white);
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    thead {
+      background: var(--green-darker);
+      color: var(--white);
+    }
+
+    th {
+      padding: 14px 16px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-align: left;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    td {
+      padding: 12px 16px;
+      font-size: 0.9rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    tr:hover td { background: #f0fdf4; }
+
+    .email-cell {
+      font-weight: 600;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      background: var(--white);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+
+    .empty-state p {
+      color: var(--text-muted);
+      font-size: 1rem;
+    }
+
+    .delete-btn {
+      background: none;
+      border: none;
+      color: #dc2626;
+      cursor: pointer;
+      font-size: 0.85rem;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: background 0.2s;
+    }
+    .delete-btn:hover { background: #fee2e2; }
+
+    @media (max-width: 600px) {
+      .stats { flex-direction: column; }
+      .actions { flex-wrap: wrap; }
+      .header { flex-direction: column; align-items: flex-start; gap: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>💰 Waitlist Admin</h1>
+      <a href="index.html" class="back-link">← Volver a la landing</a>
+    </div>
+
+    <div class="auth-card">
+      <p>Esta versión de la waitlist envía cada inscripción directo a <strong>ramirocarnicersouble8@gmail.com</strong> usando FormSubmit.</p>
+      <p>No hay panel de administración acá. Si más adelante querés guardar leads en Sheets o en una base real, ahí sí conviene volver a una integración con backend.</p>
+      <div class="actions">
+        <button class="btn btn-export" onclick="openInbox()">Abrir Gmail</button>
+      </div>
+      <div id="table-container" class="empty-state">
+        <p>La primera inscripción va a disparar un email de confirmación de FormSubmit. Tenés que aprobarlo para empezar a recibir los siguientes leads.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function openInbox() {
+      window.open('https://mail.google.com/', '_blank');
+    }
+  </script>
+</body>
+</html>
