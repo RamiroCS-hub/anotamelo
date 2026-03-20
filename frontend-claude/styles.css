@@ -244,8 +244,8 @@ a { text-decoration: none; color: inherit; }
 }
 
 .chat-avatar {
-  width: 42px;
-  height: 42px;
+  width: 60px;
+  height: 60px;
   background: #fff;
   border-radius: 50%;
   display: flex;
