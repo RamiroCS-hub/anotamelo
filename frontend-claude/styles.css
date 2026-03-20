@@ -124,17 +124,15 @@ a { text-decoration: none; color: inherit; }
 .logo-icon { font-size: 1.5rem; }
 
 .logo-img {
-  width: 36px;
-  height: 36px;
+  width: 48px;
+  height: 48px;
   object-fit: contain;
-  border-radius: 8px;
 }
 
 .avatar-img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  border-radius: 50%;
+  object-fit: contain;
 }
 
 .nav-links {
@@ -252,14 +250,15 @@ a { text-decoration: none; color: inherit; }
 }
 
 .chat-avatar {
-  width: 36px;
-  height: 36px;
-  background: rgba(255,255,255,0.2);
+  width: 44px;
+  height: 44px;
+  background: transparent;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1.1rem;
+  overflow: visible;
 }
 
 .chat-name {
