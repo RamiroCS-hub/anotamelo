@@ -590,6 +590,13 @@ img {
   font-size: 0.95rem;
 }
 
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  justify-content: flex-end;
+}
+
 .footer-link:hover {
   text-decoration: underline;
 }
@@ -787,6 +794,10 @@ img {
 
   .footer-meta {
     justify-items: start;
+  }
+
+  .footer-links {
+    justify-content: flex-start;
   }
 }
 
