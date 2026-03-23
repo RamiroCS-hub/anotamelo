@@ -4,7 +4,7 @@
 - **ID**: 016
 - **Slug**: 016-webhook-hardening-and-privacy-controls
 - **Tipo**: fix
-- **Estado**: tasked
+- **Estado**: done
 
 ## Resumen
 Cerrar degradaciones de seguridad todavía abiertas en el webhook, la configuración persistente grupal, los logs sensibles y la ingesta de media.
@@ -23,8 +23,8 @@ Cerrar degradaciones de seguridad todavía abiertas en el webhook, la configurac
 - [x] 1-functional/spec.md
 - [x] 2-technical/spec.md
 - [x] 3-tasks/tasks.json
-- [ ] 4-implementation/progress.md
-- [ ] 5-verify/report.md
+- [x] 4-implementation/progress.md
+- [x] 5-verify/report.md
 
 ## Fechas
 - **Creada**: 2026-03-23
@@ -36,3 +36,4 @@ Cerrar degradaciones de seguridad todavía abiertas en el webhook, la configurac
 - Hoy cualquier mensaje grupal puede intentar persistir una personalidad/configuración compartida aunque no exista una autoridad verificable para ese cambio.
 - Los logs actuales siguen incluyendo texto de mensajes y cuerpos de error remotos que pueden contener datos financieros o prompts sensibles.
 - El pipeline de audio e imagen todavía no aplica límites de tamaño/tipo antes de OCR o transcripción.
+- La implementación dejó firma obligatoria por defecto con bypass local explícito, bloqueo deny-by-default para persistencia grupal, logging sanitizado y preflight de media por metadata.

@@ -50,6 +50,21 @@ async def test_personality_persistence():
     assert mock_config.custom_prompt == "Nuevo prompt"
     mock_session.commit.assert_called_once()
 
+
+@pytest.mark.asyncio
+async def test_group_personality_persistence_is_blocked():
+    from app.services.personality import (
+        GroupPersistentConfigNotAllowed,
+        save_custom_prompt,
+    )
+
+    mock_session = AsyncMock()
+
+    with pytest.raises(GroupPersistentConfigNotAllowed):
+        await save_custom_prompt(mock_session, "group_123", "Nuevo prompt grupal", is_group=True)
+
+    mock_session.commit.assert_not_called()
+
 @pytest.mark.asyncio
 async def test_personality_context_injection():
     # Probamos que el AgentLoop inyecta el custom_prompt

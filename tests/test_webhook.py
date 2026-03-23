@@ -3,6 +3,7 @@ import httpx
 import hmac
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
@@ -22,6 +23,14 @@ def signed_headers(payload: dict, secret: str) -> dict[str, str]:
         "Content-Type": "application/json",
         "X-Hub-Signature-256": f"sha256={digest}",
     }
+
+
+def signed_post(payload: dict):
+    return client.post(
+        "/webhook",
+        data=json.dumps(payload),
+        headers=signed_headers(payload, settings.WHATSAPP_APP_SECRET),
+    )
 
 @pytest.fixture(autouse=True)
 def mock_agent():
@@ -60,12 +69,24 @@ def mock_db_services():
 @pytest.fixture(autouse=True)
 def reset_settings():
     settings.ALLOWED_PHONE_NUMBERS = []
-    settings.WHATSAPP_APP_SECRET = ""
+    settings.WHATSAPP_APP_SECRET = "top-secret"
+    settings.WHATSAPP_REQUIRE_SIGNATURE = True
+    settings.WHATSAPP_ALLOW_UNSIGNED_DEV_WEBHOOKS = False
+    settings.WHATSAPP_MAX_AUDIO_BYTES = 16 * 1024 * 1024
+    settings.WHATSAPP_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+    settings.WHATSAPP_ALLOWED_AUDIO_MIME_TYPES = ["audio/ogg", "audio/mpeg"]
+    settings.WHATSAPP_ALLOWED_IMAGE_MIME_TYPES = ["image/jpeg", "image/png"]
     settings.GROUP_BOT_MENTION = "@anotamelo"
     settings.WHATSAPP_RATE_LIMIT_ENABLED = False
     yield
     settings.ALLOWED_PHONE_NUMBERS = []
-    settings.WHATSAPP_APP_SECRET = ""
+    settings.WHATSAPP_APP_SECRET = "top-secret"
+    settings.WHATSAPP_REQUIRE_SIGNATURE = True
+    settings.WHATSAPP_ALLOW_UNSIGNED_DEV_WEBHOOKS = False
+    settings.WHATSAPP_MAX_AUDIO_BYTES = 16 * 1024 * 1024
+    settings.WHATSAPP_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+    settings.WHATSAPP_ALLOWED_AUDIO_MIME_TYPES = ["audio/ogg", "audio/mpeg"]
+    settings.WHATSAPP_ALLOWED_IMAGE_MIME_TYPES = ["image/jpeg", "image/png"]
     settings.GROUP_BOT_MENTION = "@anotamelo"
     settings.WHATSAPP_RATE_LIMIT_ENABLED = False
 
@@ -95,27 +116,33 @@ async def test_webhook_audio_processing(mock_agent):
     settings.ALLOWED_PHONE_NUMBERS = ["5491112345678"]
     
     with patch("app.api.webhook.whatsapp.send_text", new_callable=AsyncMock) as mock_send_text:
-        with patch("app.api.webhook.whatsapp.download_media", new_callable=AsyncMock) as mock_download_media:
-            mock_download_media.return_value = b"fake_audio_bytes"
-            with patch("app.api.webhook.transcription.transcribe_audio", new_callable=AsyncMock) as mock_transcribe_audio:
-                mock_transcribe_audio.return_value = "Audio transcrito"
-                
-                response = client.post("/webhook", json=payload)
-                
-                assert response.status_code == 200
-                assert response.json() == {"status": "ok"}
-                
-                mock_send_text.assert_any_call("5491112345678", "Escuchando audio... 🎧")
-                mock_download_media.assert_called_once_with("media_id_456")
-                mock_transcribe_audio.assert_called_once_with(b"fake_audio_bytes")
-                
-                mock_agent.process.assert_called_once_with(
-                    "5491112345678",
-                    "Audio transcrito",
-                    replied_to_id=None,
-                    chat_type="private",
-                    group_id=None,
-                )
+        with patch("app.api.webhook.whatsapp.get_media_metadata", new_callable=AsyncMock) as mock_get_media_metadata:
+            mock_get_media_metadata.return_value = {
+                "url": "https://lookaside.test/audio",
+                "mime_type": "audio/ogg",
+                "file_size": 1200,
+            }
+            with patch("app.api.webhook.whatsapp.download_media", new_callable=AsyncMock) as mock_download_media:
+                mock_download_media.return_value = b"fake_audio_bytes"
+                with patch("app.api.webhook.transcription.transcribe_audio", new_callable=AsyncMock) as mock_transcribe_audio:
+                    mock_transcribe_audio.return_value = "Audio transcrito"
+                    
+                    response = signed_post(payload)
+                    
+                    assert response.status_code == 200
+                    assert response.json() == {"status": "ok"}
+                    
+                    mock_send_text.assert_any_call("5491112345678", "Escuchando audio... 🎧")
+                    mock_download_media.assert_called_once_with("media_id_456")
+                    mock_transcribe_audio.assert_called_once_with(b"fake_audio_bytes")
+                    
+                    mock_agent.process.assert_called_once_with(
+                        "5491112345678",
+                        "Audio transcrito",
+                        replied_to_id=None,
+                        chat_type="private",
+                        group_id=None,
+                    )
 
 @pytest.mark.asyncio
 async def test_webhook_text_processing(mock_agent):
@@ -144,7 +171,7 @@ async def test_webhook_text_processing(mock_agent):
     
     with patch("app.api.webhook.whatsapp.send_text", new_callable=AsyncMock) as mock_send_text:
         mock_send_text.return_value = "wamid_456"
-        response = client.post("/webhook", json=payload)
+        response = signed_post(payload)
         
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
@@ -186,7 +213,7 @@ async def test_webhook_group_chat_ignored(mock_agent):
     settings.ALLOWED_PHONE_NUMBERS = ["5491112345678"]
     
     with patch("app.api.webhook.whatsapp.send_text", new_callable=AsyncMock) as mock_send_text:
-        response = client.post("/webhook", json=payload)
+        response = signed_post(payload)
         
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
@@ -222,7 +249,7 @@ async def test_webhook_group_chat_processed(mock_agent):
     
     with patch("app.api.webhook.whatsapp.send_text", new_callable=AsyncMock) as mock_send_text:
         mock_send_text.return_value = "wamid_456"
-        response = client.post("/webhook", json=payload)
+        response = signed_post(payload)
         
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
@@ -272,21 +299,27 @@ async def test_webhook_image_ocr_success(mock_agent):
 
     with patch("app.api.webhook.whatsapp.send_text", new_callable=AsyncMock) as mock_send_text:
         mock_send_text.side_effect = [None, "wamid_ocr"]
-        with patch("app.api.webhook.whatsapp.download_media", new_callable=AsyncMock) as mock_download_media:
-            mock_download_media.return_value = b"fake-image"
-            with patch(
-                "app.api.webhook.receipt_ocr.extract_receipt_candidate",
-                new_callable=AsyncMock,
-            ) as mock_extract:
-                mock_extract.return_value = {
-                    "status": "high_confidence",
-                    "amount": 1234.0,
-                    "shop": "Coto",
-                    "category": "Supermercado",
-                    "detected_text": "TOTAL 1234 COTO",
-                }
+        with patch("app.api.webhook.whatsapp.get_media_metadata", new_callable=AsyncMock) as mock_get_media_metadata:
+            mock_get_media_metadata.return_value = {
+                "url": "https://lookaside.test/image",
+                "mime_type": "image/jpeg",
+                "file_size": 2048,
+            }
+            with patch("app.api.webhook.whatsapp.download_media", new_callable=AsyncMock) as mock_download_media:
+                mock_download_media.return_value = b"fake-image"
+                with patch(
+                    "app.api.webhook.receipt_ocr.extract_receipt_candidate",
+                    new_callable=AsyncMock,
+                ) as mock_extract:
+                    mock_extract.return_value = {
+                        "status": "high_confidence",
+                        "amount": 1234.0,
+                        "shop": "Coto",
+                        "category": "Supermercado",
+                        "detected_text": "TOTAL 1234 COTO",
+                    }
 
-                response = client.post("/webhook", json=payload)
+                    response = signed_post(payload)
 
     assert response.status_code == 200
     mock_agent.process.assert_not_called()
@@ -324,19 +357,25 @@ async def test_webhook_image_ocr_low_confidence(mock_agent):
     settings.ALLOWED_PHONE_NUMBERS = ["5491112345678"]
 
     with patch("app.api.webhook.whatsapp.send_text", new_callable=AsyncMock) as mock_send_text:
-        with patch("app.api.webhook.whatsapp.download_media", new_callable=AsyncMock) as mock_download_media:
-            mock_download_media.return_value = b"fake-image"
-            with patch(
-                "app.api.webhook.receipt_ocr.extract_receipt_candidate",
-                new_callable=AsyncMock,
-            ) as mock_extract:
-                mock_extract.return_value = {
-                    "status": "low_confidence",
-                    "amount": None,
-                    "shop": None,
-                    "category": "Otros",
-                }
-                response = client.post("/webhook", json=payload)
+        with patch("app.api.webhook.whatsapp.get_media_metadata", new_callable=AsyncMock) as mock_get_media_metadata:
+            mock_get_media_metadata.return_value = {
+                "url": "https://lookaside.test/image",
+                "mime_type": "image/jpeg",
+                "file_size": 2048,
+            }
+            with patch("app.api.webhook.whatsapp.download_media", new_callable=AsyncMock) as mock_download_media:
+                mock_download_media.return_value = b"fake-image"
+                with patch(
+                    "app.api.webhook.receipt_ocr.extract_receipt_candidate",
+                    new_callable=AsyncMock,
+                ) as mock_extract:
+                    mock_extract.return_value = {
+                        "status": "low_confidence",
+                        "amount": None,
+                        "shop": None,
+                        "category": "Otros",
+                    }
+                    response = signed_post(payload)
 
     assert response.status_code == 200
     mock_agent.expense_store.append_expense.assert_not_called()
@@ -407,15 +446,75 @@ def test_webhook_accepts_valid_signature(mock_agent):
     }
 
     settings.ALLOWED_PHONE_NUMBERS = ["5491112345678"]
-    settings.WHATSAPP_APP_SECRET = "top-secret"
 
     with patch("app.api.webhook.whatsapp.send_text", new_callable=AsyncMock) as mock_send_text:
         mock_send_text.return_value = "wamid_456"
-        response = client.post(
-            "/webhook",
-            data=json.dumps(payload),
-            headers=signed_headers(payload, settings.WHATSAPP_APP_SECRET),
-        )
+        response = signed_post(payload)
+
+    assert response.status_code == 200
+    mock_agent.process.assert_called_once()
+
+
+def test_webhook_rejects_when_signature_required_but_secret_missing(mock_agent):
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {
+                                    "from": "5491112345678",
+                                    "id": "wamid_123",
+                                    "type": "text",
+                                    "text": {"body": "Hola"}
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    settings.ALLOWED_PHONE_NUMBERS = ["5491112345678"]
+    settings.WHATSAPP_APP_SECRET = ""
+
+    response = client.post("/webhook", json=payload)
+
+    assert response.status_code == 503
+    mock_agent.process.assert_not_called()
+
+
+def test_webhook_accepts_unsigned_when_dev_bypass_enabled(mock_agent):
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {
+                                    "from": "5491112345678",
+                                    "id": "wamid_123",
+                                    "type": "text",
+                                    "text": {"body": "Hola"}
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    settings.ALLOWED_PHONE_NUMBERS = ["5491112345678"]
+    settings.WHATSAPP_APP_SECRET = ""
+    settings.WHATSAPP_ALLOW_UNSIGNED_DEV_WEBHOOKS = True
+
+    with patch("app.api.webhook.whatsapp.send_text", new_callable=AsyncMock) as mock_send_text:
+        mock_send_text.return_value = "wamid_456"
+        response = client.post("/webhook", json=payload)
 
     assert response.status_code == 200
     mock_agent.process.assert_called_once()
@@ -455,7 +554,7 @@ def test_webhook_rate_limit_blocks_processing(mock_agent):
     webhook.init_dependencies(mock_agent, rate_limiter=rate_limiter)
 
     with patch("app.api.webhook.whatsapp.send_text", new_callable=AsyncMock) as mock_send_text:
-        response = client.post("/webhook", json=payload)
+        response = signed_post(payload)
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
@@ -497,7 +596,7 @@ def test_webhook_rate_limit_fail_open(mock_agent):
 
     with patch("app.api.webhook.whatsapp.send_text", new_callable=AsyncMock) as mock_send_text:
         mock_send_text.return_value = "wamid_456"
-        response = client.post("/webhook", json=payload)
+        response = signed_post(payload)
 
     assert response.status_code == 200
     rate_limiter.allow_message.assert_awaited_once_with("5491112345678")
@@ -539,8 +638,130 @@ def test_webhook_discarded_group_message_does_not_consume_rate_limit(mock_agent)
     rate_limiter = AsyncMock()
     webhook.init_dependencies(mock_agent, rate_limiter=rate_limiter)
 
-    response = client.post("/webhook", json=payload)
+    response = signed_post(payload)
 
     assert response.status_code == 200
     rate_limiter.allow_message.assert_not_called()
     mock_agent.process.assert_not_called()
+
+
+def test_webhook_rejects_oversized_image_before_processing(mock_agent):
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {
+                                    "from": "5491112345678",
+                                    "id": "wamid_123",
+                                    "type": "image",
+                                    "image": {"id": "media_id_789", "mime_type": "image/jpeg"},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    settings.ALLOWED_PHONE_NUMBERS = ["5491112345678"]
+    settings.WHATSAPP_MAX_IMAGE_BYTES = 100
+
+    with patch("app.api.webhook.whatsapp.get_media_metadata", new_callable=AsyncMock) as mock_get_media_metadata:
+        mock_get_media_metadata.return_value = {
+            "url": "https://lookaside.test/image",
+            "mime_type": "image/jpeg",
+            "file_size": 101,
+        }
+        with patch("app.api.webhook.whatsapp.send_text", new_callable=AsyncMock) as mock_send_text:
+            with patch("app.api.webhook.whatsapp.download_media", new_callable=AsyncMock) as mock_download_media:
+                response = signed_post(payload)
+
+    assert response.status_code == 200
+    mock_agent.process.assert_not_called()
+    mock_download_media.assert_not_called()
+    mock_send_text.assert_called_once_with(
+        "5491112345678",
+        "El archivo es demasiado grande para procesarlo. Probá con uno más liviano.",
+    )
+
+
+def test_webhook_rejects_unsupported_audio_mime_before_processing(mock_agent):
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {
+                                    "from": "5491112345678",
+                                    "id": "wamid_123",
+                                    "type": "audio",
+                                    "audio": {"id": "media_id_456", "mime_type": "audio/wav"},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    settings.ALLOWED_PHONE_NUMBERS = ["5491112345678"]
+
+    with patch("app.api.webhook.whatsapp.get_media_metadata", new_callable=AsyncMock) as mock_get_media_metadata:
+        mock_get_media_metadata.return_value = {
+            "url": "https://lookaside.test/audio",
+            "mime_type": "audio/wav",
+            "file_size": 1200,
+        }
+        with patch("app.api.webhook.whatsapp.send_text", new_callable=AsyncMock) as mock_send_text:
+            with patch("app.api.webhook.whatsapp.download_media", new_callable=AsyncMock) as mock_download_media:
+                response = signed_post(payload)
+
+    assert response.status_code == 200
+    mock_agent.process.assert_not_called()
+    mock_download_media.assert_not_called()
+    mock_send_text.assert_called_once_with(
+        "5491112345678",
+        "Ese tipo de archivo no está soportado para procesarlo automáticamente.",
+    )
+
+
+def test_webhook_logs_do_not_include_raw_message_text(mock_agent, caplog):
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {
+                                    "from": "5491112345678",
+                                    "id": "wamid_123",
+                                    "type": "text",
+                                    "text": {"body": "Hola mensaje confidencial"},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    settings.ALLOWED_PHONE_NUMBERS = ["5491112345678"]
+
+    with patch("app.api.webhook.whatsapp.send_text", new_callable=AsyncMock) as mock_send_text:
+        mock_send_text.return_value = "wamid_456"
+        with caplog.at_level(logging.INFO):
+            response = signed_post(payload)
+
+    assert response.status_code == 200
+    assert "Hola mensaje confidencial" not in caplog.text
+    assert "5491112345678" not in caplog.text
+    assert "...5678" in caplog.text

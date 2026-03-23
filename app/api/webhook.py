@@ -32,10 +32,81 @@ def init_dependencies(agent, rate_limiter=None) -> None:
     _rate_limiter = rate_limiter
 
 
+def _mask_phone(phone: str | None) -> str:
+    if not phone:
+        return "unknown"
+    if len(phone) <= 4:
+        return "***"
+    return f"...{phone[-4:]}"
+
+
+def _mask_identifier(value: str | None) -> str:
+    if not value:
+        return "unknown"
+    if len(value) <= 8:
+        return value
+    return f"{value[:6]}..."
+
+
+def _normalize_mime_type(mime_type: str | None) -> str | None:
+    if not mime_type:
+        return None
+    normalized = mime_type.split(";", 1)[0].strip().lower()
+    return normalized or None
+
+
+def _validate_media_policy(
+    msg_type: str,
+    media_metadata: dict | None,
+    payload_mime_type: str | None,
+) -> tuple[str | None, str | None]:
+    if not media_metadata or not media_metadata.get("url"):
+        return (
+            "metadata_unavailable",
+            "No pude validar el archivo que mandaste. Probá de nuevo 🙏",
+        )
+
+    mime_type = _normalize_mime_type(media_metadata.get("mime_type")) or _normalize_mime_type(
+        payload_mime_type
+    )
+    if msg_type == "audio":
+        allowed_types = {mime.lower() for mime in settings.WHATSAPP_ALLOWED_AUDIO_MIME_TYPES}
+        max_bytes = settings.WHATSAPP_MAX_AUDIO_BYTES
+    else:
+        allowed_types = {mime.lower() for mime in settings.WHATSAPP_ALLOWED_IMAGE_MIME_TYPES}
+        max_bytes = settings.WHATSAPP_MAX_IMAGE_BYTES
+
+    if not mime_type or mime_type not in allowed_types:
+        return (
+            "unsupported_mime_type",
+            "Ese tipo de archivo no está soportado para procesarlo automáticamente.",
+        )
+
+    try:
+        file_size = int(media_metadata.get("file_size"))
+    except (TypeError, ValueError):
+        return (
+            "missing_file_size",
+            "No pude validar el archivo que mandaste. Probá de nuevo 🙏",
+        )
+
+    if file_size > max_bytes:
+        return (
+            "media_too_large",
+            "El archivo es demasiado grande para procesarlo. Probá con uno más liviano.",
+        )
+
+    return None, None
+
+
 def verify_webhook_signature(body: bytes, signature_header: str | None) -> None:
+    if settings.WHATSAPP_ALLOW_UNSIGNED_DEV_WEBHOOKS or not settings.WHATSAPP_REQUIRE_SIGNATURE:
+        return
+
     secret = settings.WHATSAPP_APP_SECRET
     if not secret:
-        return
+        logger.error("Webhook signature verification required but WHATSAPP_APP_SECRET is empty")
+        raise HTTPException(status_code=503, detail="Verificación de firma no configurada")
 
     if not signature_header or not signature_header.startswith("sha256="):
         raise HTTPException(status_code=401, detail="Firma de webhook inválida")
@@ -84,7 +155,7 @@ async def _process_message_background(
     chat_type: str = "private",
     group_id: str | None = None,
     group_name: str | None = None,
-    image_mime_type: str | None = None,
+    media_mime_type: str | None = None,
 ):
     try:
         from app.db.database import async_session_maker
@@ -135,7 +206,7 @@ async def _process_message_background(
 
             candidate = await receipt_ocr.extract_receipt_candidate(
                 image_bytes,
-                mime_type=image_mime_type or "image/jpeg",
+                mime_type=media_mime_type or "image/jpeg",
             )
             if candidate["status"] in {"error", "low_confidence"}:
                 error_msg = "No pude extraer datos confiables del ticket. Probá con una foto más clara o registralo por texto."
@@ -216,7 +287,7 @@ async def _process_message_background(
                             alert["message"] for alert in alerts
                         )
                 except Exception as e:
-                    logger.error("Error evaluando alertas OCR para %s: %s", phone, e)
+                    logger.error("Error evaluando alertas OCR para %s: %s", _mask_phone(phone), e)
 
             memory_key = f"group:{group_id}" if chat_type == "group" and group_id else phone
             wamid = await whatsapp.send_text(reply_target, confirmation)
@@ -242,7 +313,7 @@ async def _process_message_background(
                 memory_key = f"group:{group_id}" if chat_type == "group" and group_id else phone
                 _agent.memory.store_wamid(memory_key, wamid, reply)
     except Exception as e:
-        logger.error("Error procesando mensaje de %s: %s", phone, e, exc_info=True)
+        logger.error("Error procesando mensaje de %s: %s", _mask_phone(phone), e, exc_info=True)
         try:
             reply_target = group_id if chat_type == "group" and group_id else phone
             await whatsapp.send_text(
@@ -280,7 +351,11 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
 
         # Solo procesar mensajes de texto, audio e imagen
         if msg_type not in ["text", "audio", "image"]:
-            logger.info("Mensaje no soportado ignorado de %s (tipo: %s)", phone, msg_type)
+            logger.info(
+                "Mensaje no soportado ignorado de %s (tipo: %s)",
+                _mask_phone(phone),
+                msg_type,
+            )
             return {"status": "ok"}
 
         text = ""
@@ -289,17 +364,18 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
         is_image = False
         chat_type = "private"
         group_name = None
-        image_mime_type = None
+        media_mime_type = None
 
         if msg_type == "text":
             text = message["text"]["body"]
         elif msg_type == "audio":
             media_id = message["audio"]["id"]
+            media_mime_type = message["audio"].get("mime_type")
             is_audio = True
         elif msg_type == "image":
             media_id = message["image"]["id"]
             text = message["image"].get("caption", "")
-            image_mime_type = message["image"].get("mime_type")
+            media_mime_type = message["image"].get("mime_type")
             is_image = True
 
         # Check if it's a group chat (indicated by the presence of group_id)
@@ -316,7 +392,11 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
         # Detectar si el usuario respondió a un mensaje específico (reply nativo de WhatsApp)
         replied_to_id: str | None = message.get("context", {}).get("id")
         if replied_to_id:
-            logger.info("Reply detectado de %s → wamid referenciado: %s", phone, replied_to_id)
+            logger.info(
+                "Reply detectado. sender=%s reply=%s",
+                _mask_phone(phone),
+                _mask_identifier(replied_to_id),
+            )
 
     except (KeyError, IndexError) as e:
         logger.warning("Payload inválido: %s", e)
@@ -324,19 +404,24 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
 
     # Verificar whitelist (si está configurada)
     if settings.ALLOWED_PHONE_NUMBERS and phone not in settings.ALLOWED_PHONE_NUMBERS:
-        logger.warning("Mensaje de número no autorizado: %s", phone)
+        logger.warning("Mensaje de número no autorizado: %s", _mask_phone(phone))
         return {"status": "ok"}
 
     if settings.WHATSAPP_RATE_LIMIT_ENABLED and _rate_limiter is not None:
         try:
             decision = await _rate_limiter.allow_message(phone)
         except Exception as e:
-            logger.error("Error evaluando rate limit para %s: %s", phone, e, exc_info=True)
+            logger.error(
+                "Error evaluando rate limit para %s: %s",
+                _mask_phone(phone),
+                e,
+                exc_info=True,
+            )
         else:
             if not decision.allowed:
                 logger.warning(
                     "Rate limit excedido para %s. Reintento sugerido en %ss",
-                    phone,
+                    _mask_phone(phone),
                     decision.retry_after_seconds,
                 )
                 if decision.should_notify:
@@ -347,12 +432,47 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
                     )
                 return {"status": "ok"}
 
+    if media_id and msg_type in {"audio", "image"}:
+        media_metadata = await whatsapp.get_media_metadata(media_id)
+        media_error_code, media_error_message = _validate_media_policy(
+            msg_type,
+            media_metadata,
+            media_mime_type,
+        )
+        if media_error_code:
+            reply_target = group_id if chat_type == "group" and group_id else phone
+            logger.warning(
+                "Media rechazada. sender=%s type=%s media=%s reason=%s",
+                _mask_phone(phone),
+                msg_type,
+                _mask_identifier(media_id),
+                media_error_code,
+            )
+            background_tasks.add_task(whatsapp.send_text, reply_target, media_error_message)
+            return {"status": "ok"}
+
     if is_audio:
-        logger.info("Mensaje de audio recibido de %s: media_id %s", phone, media_id)
+        logger.info(
+            "Mensaje de audio recibido. sender=%s media=%s chat=%s",
+            _mask_phone(phone),
+            _mask_identifier(media_id),
+            chat_type,
+        )
     elif is_image:
-        logger.info("Mensaje de imagen recibido de %s: media_id %s", phone, media_id)
+        logger.info(
+            "Mensaje de imagen recibido. sender=%s media=%s chat=%s caption_length=%d",
+            _mask_phone(phone),
+            _mask_identifier(media_id),
+            chat_type,
+            len(text),
+        )
     else:
-        logger.info("Mensaje recibido de %s: %s", phone, text)
+        logger.info(
+            "Mensaje recibido. sender=%s type=text chat=%s length=%d",
+            _mask_phone(phone),
+            chat_type,
+            len(text),
+        )
 
     # Encolar procesamiento en background
     background_tasks.add_task(
@@ -365,7 +485,7 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
         chat_type,
         group_id,
         group_name,
-        image_mime_type,
+        media_mime_type,
     )
 
     # Meta requiere siempre 200

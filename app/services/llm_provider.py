@@ -372,16 +372,16 @@ class DeepSeekProvider:
 
     def _log_http_error(self, operation: str, exc) -> None:
         response = exc.response
-        body = ""
+        body_length: int | str = "unknown"
         try:
-            body = response.text
+            body_length = len(response.text or "")
         except Exception:
-            body = "<body-unavailable>"
+            body_length = "unknown"
         logger.error(
-            "DeepSeek %s falló con HTTP %s. body=%s",
+            "DeepSeek %s falló con HTTP %s. body_length=%s",
             operation,
             response.status_code,
-            body[:1000],
+            body_length,
         )
 
     async def _fallback_chat_with_tools(

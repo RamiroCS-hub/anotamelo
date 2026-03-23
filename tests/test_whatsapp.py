@@ -1,7 +1,8 @@
 import pytest
 import httpx
 from unittest.mock import AsyncMock, patch
-from app.services.whatsapp import download_media, GRAPH_API_URL
+
+from app.services.whatsapp import download_media, get_media_metadata, GRAPH_API_URL
 from app.config import settings
 
 @pytest.mark.asyncio
@@ -41,6 +42,25 @@ async def test_download_media_success():
             call2_args, call2_kwargs = mock_get_call.call_args_list[1]
             assert call2_args[0] == "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=123"
             assert call2_kwargs["headers"]["Authorization"] == "Bearer fake_token"
+
+
+@pytest.mark.asyncio
+async def test_get_media_metadata_success():
+    mock_get_url_response = AsyncMock()
+    mock_get_url_response.status_code = 200
+    mock_get_url_response.json = lambda: {
+        "url": "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=123",
+        "mime_type": "image/jpeg",
+        "file_size": 321,
+    }
+    mock_get_url_response.raise_for_status = lambda: None
+
+    with patch("httpx.AsyncClient.get", return_value=mock_get_url_response):
+        with patch("app.services.whatsapp.settings.WHATSAPP_TOKEN", "fake_token"):
+            result = await get_media_metadata("media_id_123")
+
+    assert result["mime_type"] == "image/jpeg"
+    assert result["file_size"] == 321
 
 @pytest.mark.asyncio
 async def test_download_media_first_step_fails():

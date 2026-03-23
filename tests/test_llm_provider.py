@@ -239,6 +239,23 @@ class TestDeepSeekProviderChatWithTools:
     def _make_provider(self, test_settings):
         return DeepSeekProvider(test_settings)
 
+
+def test_log_http_error_redacts_response_body(test_settings, caplog):
+    provider = DeepSeekProvider(test_settings)
+    request = httpx.Request("POST", test_settings.DEEPSEEK_BASE_URL)
+    response = httpx.Response(
+        400,
+        request=request,
+        text='{"error":"super-secret-prompt-body"}',
+    )
+    exc = httpx.HTTPStatusError("bad request", request=request, response=response)
+
+    with caplog.at_level("ERROR"):
+        provider._log_http_error("chat_with_tools", exc)
+
+    assert "super-secret-prompt-body" not in caplog.text
+    assert "body_length=" in caplog.text
+
     def _mock_tool_use_response(self, tool_name: str, arguments: dict):
         """Construye mock de respuesta de HTTPX con tool_calls."""
         mock_response = MagicMock()
